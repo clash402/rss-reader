@@ -18,3 +18,17 @@ icon = "run"
 command = '''
 npm run dev
 '''
+
+[[actions]]
+name = "Format"
+icon = "format"
+command = '''
+npm run format
+'''
+
+[[actions]]
+name = "Lint"
+icon = "lint"
+command = '''
+npm run lint
+'''
