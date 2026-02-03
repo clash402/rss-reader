@@ -11,6 +11,10 @@
     "format": "prettier . --write",
     "format:check": "prettier . --check",
     "format:watch": "prettier . --write --watch",
+    "typegen": "next typegen",
+    "prelint": "npm run typegen --silent",
+    "prelint:watch": "npm run typegen --silent",
+    "postinstall": "npm run typegen --silent",
     "prepare": "husky"
   },
   "dependencies": {
@@ -35,7 +39,7 @@
   "lint-staged": {
     "*.{ts,tsx,js,jsx,md,css}": [
       "prettier --write",
-      "eslint --max-warnings=0 --fix --cache"
+      "npm run typegen --silent && eslint --max-warnings=0 --fix --cache"
     ]
   }
 }
