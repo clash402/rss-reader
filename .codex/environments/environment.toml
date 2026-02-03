@@ -32,3 +32,10 @@ icon = "lint"
 command = '''
 npm run lint
 '''
+
+[[actions]]
+name = "Merge Workflow"
+icon = "run"
+command = '''
+./scripts/merge_pr_workflow.sh
+'''
