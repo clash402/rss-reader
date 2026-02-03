@@ -37,5 +37,5 @@ npm run lint
 name = "Merge Workflow"
 icon = "run"
 command = '''
-./scripts/merge_pr_workflow.sh
+./scripts/merge_pr_workflow.sh --repo clash402/rss-reader --path .
 '''
