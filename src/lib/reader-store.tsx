@@ -10,9 +10,11 @@ import {
   saveFeed,
   setMetadata,
   upsertArticles,
+  updateArticle,
   updateArticleState,
 } from "@/lib/storage";
 import type { NormalizedFeedResponse } from "@/lib/server/feed-parser";
+import type { ReaderExtraction } from "@/lib/server/reader-extractor";
 
 const DEMO_SEEDED_KEY = "demo-seeded-v1";
 
@@ -30,6 +32,8 @@ type ReaderStoreContextValue = {
   isAddingFeed: boolean;
   refreshingFeedIds: string[];
   isRefreshingAll: boolean;
+  loadReaderView: (articleId: string) => Promise<void>;
+  readerLoadingIds: string[];
 };
 
 const ReaderStoreContext = createContext<ReaderStoreContextValue | null>(null);
@@ -47,6 +51,7 @@ export function ReaderStoreProvider({ children }: { children: React.ReactNode })
   const [isAddingFeed, setIsAddingFeed] = useState(false);
   const [refreshingFeedIds, setRefreshingFeedIds] = useState<string[]>([]);
   const [isRefreshingAll, setIsRefreshingAll] = useState(false);
+  const [readerLoadingIds, setReaderLoadingIds] = useState<string[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -97,6 +102,38 @@ export function ReaderStoreProvider({ children }: { children: React.ReactNode })
       setArticles((prev) =>
         prev.map((item) => (item.id === id ? { ...item, read: nextValue } : item)),
       );
+    },
+    [articles],
+  );
+
+  const loadReaderView = useCallback(
+    async (articleId: string) => {
+      const article = articles.find((entry) => entry.id === articleId);
+      if (!article || !article.url) return;
+      if (article.contentText && article.contentText.length > 200) return;
+      setReaderLoadingIds((prev) => (prev.includes(articleId) ? prev : [...prev, articleId]));
+      try {
+        const result = await requestReader({ url: article.url });
+        await updateArticle(articleId, {
+          contentText: result.contentText,
+          contentHtml: result.contentHtml,
+        });
+        setArticles((prev) =>
+          prev.map((entry) =>
+            entry.id === articleId
+              ? {
+                  ...entry,
+                  contentText: result.contentText,
+                  contentHtml: result.contentHtml,
+                }
+              : entry,
+          ),
+        );
+      } catch {
+        // swallow for now; UI can show fallback text
+      } finally {
+        setReaderLoadingIds((prev) => prev.filter((id) => id !== articleId));
+      }
     },
     [articles],
   );
@@ -192,6 +229,8 @@ export function ReaderStoreProvider({ children }: { children: React.ReactNode })
       isAddingFeed,
       refreshingFeedIds,
       isRefreshingAll,
+      loadReaderView,
+      readerLoadingIds,
     };
   }, [
     feeds,
@@ -206,6 +245,8 @@ export function ReaderStoreProvider({ children }: { children: React.ReactNode })
     isAddingFeed,
     refreshingFeedIds,
     isRefreshingAll,
+    loadReaderView,
+    readerLoadingIds,
   ]);
 
   return <ReaderStoreContext.Provider value={value}>{children}</ReaderStoreContext.Provider>;
@@ -255,4 +296,17 @@ async function requestFeed(body: { url: string; etag?: string; lastModified?: st
     throw new Error(message || "Unable to parse feed");
   }
   return (await response.json()) as NormalizedFeedResponse;
+}
+
+async function requestReader(body: { url: string }) {
+  const response = await fetch("/api/reader", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || "Unable to load reader data");
+  }
+  return (await response.json()) as ReaderExtraction;
 }

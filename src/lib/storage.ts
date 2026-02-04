@@ -116,6 +116,15 @@ export async function updateArticleState(
   return nextArticle;
 }
 
+export async function updateArticle(id: string, updates: Partial<Article>) {
+  const db = await getDB();
+  const article = await db.get("articles", id);
+  if (!article) return null;
+  const nextArticle = { ...article, ...updates };
+  await db.put("articles", nextArticle);
+  return nextArticle;
+}
+
 export async function setMetadata<T>(key: string, value: T) {
   const db = await getDB();
   await db.put("metadata", { key, value });

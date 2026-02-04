@@ -41,6 +41,8 @@ export function HomeShell() {
     isAddingFeed,
     refreshingFeedIds,
     isRefreshingAll,
+    loadReaderView,
+    readerLoadingIds,
   } = useReaderStore();
   const [activeView, setActiveView] = useState<ViewID>("all");
   const [activeTag, setActiveTag] = useState<string | null>(null);
@@ -103,6 +105,15 @@ export function HomeShell() {
 
   const selectedArticle =
     filteredArticles.find((article) => article.id === resolvedArticleId) ?? filteredArticles[0];
+  const readerLoading =
+    selectedArticle?.id != null ? readerLoadingIds.includes(selectedArticle.id) : false;
+
+  useEffect(() => {
+    if (!selectedArticle) return;
+    if (selectedArticle.contentText && selectedArticle.contentText.length > 200) return;
+    if (!selectedArticle.url) return;
+    void loadReaderView(selectedArticle.id);
+  }, [selectedArticle, loadReaderView]);
 
   if (bootstrapping) {
     return (
@@ -335,6 +346,7 @@ export function HomeShell() {
                       feed={feed}
                       onToggleSaved={() => toggleSaved(selectedArticle.id)}
                       onToggleRead={(force?: boolean) => toggleRead(selectedArticle.id, force)}
+                      isLoading={readerLoading}
                     />
                   );
                 })()
@@ -513,11 +525,13 @@ function ArticleDetail({
   feed,
   onToggleSaved,
   onToggleRead,
+  isLoading,
 }: {
   article: Article;
   feed: Feed;
   onToggleSaved: () => void;
   onToggleRead: (force?: boolean) => void;
+  isLoading: boolean;
 }) {
   return (
     <div className="flex h-full flex-col gap-4">
@@ -545,7 +559,15 @@ function ArticleDetail({
           >
             Save
           </Button>
-          <Button variant="outline" size="sm">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              if (article.url) {
+                window.open(article.url, "_blank", "noopener,noreferrer");
+              }
+            }}
+          >
             Open original
           </Button>
         </div>
@@ -558,10 +580,18 @@ function ArticleDetail({
         <span>{formatDate(article.publishedAt ?? FALLBACK_PUBLISHED_AT)}</span>
       </div>
       <div className="prose prose-sm max-w-none text-[rgb(var(--foreground))] prose-headings:text-[rgb(var(--foreground))] prose-p:text-[rgb(var(--foreground))] dark:prose-invert">
-        <p>{article.contentText ?? article.snippet ?? "Reader view placeholder."}</p>
-        <p className="text-[rgb(var(--muted-foreground))]">
-          This is only sample content while we build out feed ingestion and reader extraction.
-        </p>
+        {isLoading ? (
+          <p className="text-[rgb(var(--muted-foreground))]">Extracting reader view…</p>
+        ) : article.contentHtml ? (
+          <div dangerouslySetInnerHTML={{ __html: article.contentHtml }} />
+        ) : (
+          <p>{article.contentText ?? article.snippet ?? "Reader view placeholder."}</p>
+        )}
+        {!isLoading && !article.contentHtml && !article.contentText && (
+          <p className="text-[rgb(var(--muted-foreground))]">
+            We’ll show a clean reader view once we can extract the article content.
+          </p>
+        )}
       </div>
     </div>
   );
