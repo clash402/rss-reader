@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Article, Feed } from "@/lib/types";
 import { cn, formatDate, truncate } from "@/lib/utils";
 import { Panel } from "@/components/ui/panel";
@@ -17,6 +17,8 @@ import {
 } from "@/components/icons";
 import { useReaderStore } from "@/lib/reader-store";
 import type { DiscoveredFeed } from "@/lib/server/feed-discovery";
+import { toast } from "sonner";
+import { useSwipeable } from "react-swipeable";
 
 const views = [
   { id: "all", label: "All" },
@@ -50,8 +52,6 @@ export function HomeShell() {
   const [activeArticle, setActiveArticle] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [addFeedOpen, setAddFeedOpen] = useState(false);
-
-  const bootstrapping = loading && feeds.length === 0 && articles.length === 0;
 
   const resolvedFeedId = useMemo(() => {
     if (activeFeed && feeds.some((feed) => feed.id === activeFeed)) {
@@ -107,21 +107,94 @@ export function HomeShell() {
     filteredArticles.find((article) => article.id === resolvedArticleId) ?? filteredArticles[0];
   const readerLoading =
     selectedArticle?.id != null ? readerLoadingIds.includes(selectedArticle.id) : false;
+  const selectedArticleId = selectedArticle?.id;
+  const selectedArticleUrl = selectedArticle?.url;
+  const selectedArticleContent = selectedArticle?.contentText;
 
   useEffect(() => {
-    if (!selectedArticle) return;
-    if (selectedArticle.contentText && selectedArticle.contentText.length > 200) return;
-    if (!selectedArticle.url) return;
-    void loadReaderView(selectedArticle.id);
-  }, [selectedArticle, loadReaderView]);
+    if (!selectedArticleId || !selectedArticleUrl) return;
+    if (selectedArticleContent && selectedArticleContent.length > 200) return;
+    void loadReaderView(selectedArticleId);
+  }, [selectedArticleId, selectedArticleUrl, selectedArticleContent, loadReaderView]);
 
-  if (bootstrapping) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-[rgb(var(--background))] text-[rgb(var(--muted-foreground))]">
-        Loading your reader…
-      </div>
-    );
-  }
+  const handleToggleSaved = useCallback(
+    async (articleId: string) => {
+      const article = articles.find((entry) => entry.id === articleId);
+      const nextValue = !article?.saved;
+      await toggleSaved(articleId);
+      const description = article?.title ?? "Article updated";
+      if (nextValue) {
+        toast.success("Saved for later", { description });
+      } else {
+        toast("Removed from Saved", { description });
+      }
+    },
+    [articles, toggleSaved],
+  );
+
+  const handleToggleRead = useCallback(
+    async (articleId: string, force?: boolean) => {
+      const article = articles.find((entry) => entry.id === articleId);
+      const nextValue = typeof force === "boolean" ? force : !article?.read;
+      await toggleRead(articleId, force);
+      toast.success(nextValue ? "Marked as read" : "Marked as unread", {
+        description: article?.title ?? "Updated entry",
+      });
+    },
+    [articles, toggleRead],
+  );
+
+  const moveSelection = useCallback(
+    (direction: 1 | -1) => {
+      if (!filteredArticles.length) return;
+      const currentIndex = filteredArticles.findIndex(
+        (article) => article.id === resolvedArticleId,
+      );
+      const safeIndex =
+        currentIndex === -1
+          ? 0
+          : (currentIndex + direction + filteredArticles.length) % filteredArticles.length;
+      const nextArticle = filteredArticles[safeIndex];
+      if (!nextArticle) return;
+      setActiveArticle(nextArticle.id);
+      setActiveFeed(nextArticle.feedId);
+    },
+    [filteredArticles, resolvedArticleId, setActiveArticle, setActiveFeed],
+  );
+
+  useEffect(() => {
+    function handleKeydown(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      if (target && ["INPUT", "TEXTAREA"].includes(target.tagName)) return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (!selectedArticleId) return;
+
+      if (event.key === "s" || event.key === "S") {
+        event.preventDefault();
+        void handleToggleSaved(selectedArticleId);
+      } else if (event.key === "r" || event.key === "R") {
+        event.preventDefault();
+        void handleToggleRead(selectedArticleId);
+      } else if (event.key === "j" || event.key === "ArrowDown") {
+        event.preventDefault();
+        moveSelection(1);
+      } else if (event.key === "k" || event.key === "ArrowUp") {
+        event.preventDefault();
+        moveSelection(-1);
+      }
+    }
+
+    window.addEventListener("keydown", handleKeydown);
+    return () => window.removeEventListener("keydown", handleKeydown);
+  }, [selectedArticleId, handleToggleSaved, handleToggleRead, moveSelection]);
+
+  const handleAddFeedSubmit = useCallback(
+    async (payload: { url: string; tags: string[] }) => {
+      await addFeed(payload);
+      toast.success("Feed added", { description: payload.url });
+    },
+    [addFeed],
+  );
 
   const currentFeedRefreshing = resolvedFeedId ? refreshingFeedIds.includes(resolvedFeedId) : false;
 
@@ -163,6 +236,7 @@ export function HomeShell() {
               icon={<IconPlus />}
               size="lg"
               onClick={() => setAddFeedOpen(true)}
+              disabled={loading}
             >
               Add feed
             </Button>
@@ -208,23 +282,26 @@ export function HomeShell() {
             </div>
 
             <div className="flex flex-col gap-2 overflow-y-auto pr-1">
-              {filteredFeeds.map((feed) => (
-                <FeedRow
-                  key={feed.id}
-                  feed={feed}
-                  active={feed.id === resolvedFeedId}
-                  refreshing={refreshingFeedIds.includes(feed.id)}
-                  onClick={() => {
-                    setActiveFeed(feed.id);
-                    setActiveArticle(null);
-                    setActiveView("all");
-                  }}
-                  onRefresh={() => {
-                    void refreshFeed(feed.id);
-                  }}
-                />
-              ))}
-              {filteredFeeds.length === 0 && (
+              {loading ? (
+                <FeedSkeletonList />
+              ) : filteredFeeds.length > 0 ? (
+                filteredFeeds.map((feed) => (
+                  <FeedRow
+                    key={feed.id}
+                    feed={feed}
+                    active={feed.id === resolvedFeedId}
+                    refreshing={refreshingFeedIds.includes(feed.id)}
+                    onClick={() => {
+                      setActiveFeed(feed.id);
+                      setActiveArticle(null);
+                      setActiveView("all");
+                    }}
+                    onRefresh={() => {
+                      void refreshFeed(feed.id);
+                    }}
+                  />
+                ))
+              ) : (
                 <EmptyState
                   title="No feeds yet"
                   description="Add a site or feed URL to start reading."
@@ -277,6 +354,9 @@ export function HomeShell() {
             >
               {currentFeedRefreshing || isRefreshingAll ? "Refreshing…" : "Refresh"}
             </Button>
+            <p className="text-xs text-[rgb(var(--muted-foreground))]">
+              Tip: J/K to browse, S to save, R to toggle read
+            </p>
           </div>
 
           <div className="grid gap-4 lg:grid-cols-[minmax(320px,420px)_minmax(0,1fr)]">
@@ -295,7 +375,9 @@ export function HomeShell() {
                 </Button>
               </div>
               <div className="flex-1 overflow-y-auto">
-                {filteredArticles.length === 0 ? (
+                {loading ? (
+                  <ArticleSkeletonList />
+                ) : filteredArticles.length === 0 ? (
                   <EmptyState
                     title={query ? "No matches" : "Nothing yet"}
                     description={
@@ -317,8 +399,8 @@ export function HomeShell() {
                             feed={feed}
                             active={article.id === selectedArticle?.id}
                             onSelect={() => setActiveArticle(article.id)}
-                            onToggleSaved={() => toggleSaved(article.id)}
-                            onToggleRead={() => toggleRead(article.id)}
+                            onToggleSaved={() => handleToggleSaved(article.id)}
+                            onToggleRead={() => handleToggleRead(article.id)}
                           />
                         );
                       })(),
@@ -329,7 +411,9 @@ export function HomeShell() {
             </Panel>
 
             <Panel className="min-h-[420px] rounded-[32px] border-[rgb(var(--border))]/80 bg-[rgb(var(--surface-elevated))]/70 p-6">
-              {selectedArticle ? (
+              {loading && !selectedArticle ? (
+                <ReaderSkeleton />
+              ) : selectedArticle ? (
                 (() => {
                   const feed = feeds.find((entry) => entry.id === selectedArticle.feedId);
                   if (!feed) {
@@ -344,8 +428,10 @@ export function HomeShell() {
                     <ArticleDetail
                       article={selectedArticle}
                       feed={feed}
-                      onToggleSaved={() => toggleSaved(selectedArticle.id)}
-                      onToggleRead={(force?: boolean) => toggleRead(selectedArticle.id, force)}
+                      onToggleSaved={() => handleToggleSaved(selectedArticle.id)}
+                      onToggleRead={(force?: boolean) =>
+                        handleToggleRead(selectedArticle.id, force)
+                      }
                       isLoading={readerLoading}
                     />
                   );
@@ -363,9 +449,7 @@ export function HomeShell() {
       <AddFeedSheet
         open={addFeedOpen}
         onClose={() => setAddFeedOpen(false)}
-        onSubmit={async (payload) => {
-          await addFeed(payload);
-        }}
+        onSubmit={handleAddFeedSubmit}
         isSubmitting={isAddingFeed}
         availableTags={tags}
       />
@@ -440,12 +524,24 @@ function ArticleRow({
   feed: Feed;
   active: boolean;
   onSelect: () => void;
-  onToggleSaved: () => void;
-  onToggleRead: () => void;
+  onToggleSaved: () => Promise<void> | void;
+  onToggleRead: () => Promise<void> | void;
 }) {
+  const swipeHandlers = useSwipeable({
+    onSwipedLeft: () => {
+      void onToggleSaved();
+    },
+    onSwipedRight: () => {
+      void onToggleRead();
+    },
+    preventScrollOnSwipe: true,
+    trackMouse: true,
+  });
+
   return (
     <li>
       <article
+        {...swipeHandlers}
         role="button"
         tabIndex={0}
         onClick={onSelect}
@@ -453,9 +549,16 @@ function ArticleRow({
           if (event.key === "Enter" || event.key === " ") {
             event.preventDefault();
             onSelect();
+          } else if (event.key === "s" || event.key === "S") {
+            event.preventDefault();
+            void onToggleSaved();
+          } else if (event.key === "r" || event.key === "R") {
+            event.preventDefault();
+            void onToggleRead();
           }
         }}
         aria-pressed={active}
+        aria-label={`${article.title}. Swipe right to toggle read, left to save.`}
         className={cn(
           "flex w-full flex-col gap-2 px-5 py-4 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--accent))]/40",
           active
@@ -828,6 +931,49 @@ function AddFeedSheet({ open, onClose, onSubmit, isSubmitting, availableTags }: 
             </Button>
           </div>
         </form>
+      </div>
+    </div>
+  );
+}
+
+function FeedSkeletonList() {
+  return (
+    <div className="flex flex-col gap-2">
+      {Array.from({ length: 5 }).map((_, index) => (
+        <div
+          key={index}
+          className="h-14 w-full animate-pulse rounded-2xl border border-[rgb(var(--border))]/60 bg-[rgb(var(--muted))]/40"
+        />
+      ))}
+    </div>
+  );
+}
+
+function ArticleSkeletonList() {
+  return (
+    <ul className="divide-y divide-[rgb(var(--border))]/50">
+      {Array.from({ length: 4 }).map((_, index) => (
+        <li key={index} className="animate-pulse px-5 py-5">
+          <div className="mb-2 h-3 w-24 rounded-full bg-[rgb(var(--muted))]/60" />
+          <div className="mb-2 h-4 w-3/4 rounded-full bg-[rgb(var(--muted))]/50" />
+          <div className="h-3 w-1/2 rounded-full bg-[rgb(var(--muted))]/40" />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function ReaderSkeleton() {
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="h-6 w-2/3 animate-pulse rounded-full bg-[rgb(var(--muted))]/50" />
+      <div className="space-y-3">
+        {Array.from({ length: 5 }).map((_, index) => (
+          <div
+            key={index}
+            className="h-3 w-full animate-pulse rounded-full bg-[rgb(var(--muted))]/40"
+          />
+        ))}
       </div>
     </div>
   );
