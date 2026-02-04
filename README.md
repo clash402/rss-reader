@@ -1,36 +1,71 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+## Current – Personal RSS Reader
 
-## Getting Started
+Current is a calm, local-first RSS/Atom reader built with the Next.js App Router. The MVP keeps everything on-device, emphasizes a distraction-free interface, and lays the groundwork for future sync/auth layers.
 
-First, run the development server:
+### Tech stack
+
+- **Next.js 16 + React 19 + TypeScript** for the UI and server routes.
+- **Tailwind CSS 4** with custom tokens plus lightweight shadcn-style primitives.
+- **IndexedDB via `idb`** for feeds, articles, tags, and metadata.
+- **Server utilities**: `rss-parser` for feeds, `jsdom` + `Readability` for reader extraction, and `sanitize-html` for safe rendering.
+- **UX polish**: `react-swipeable` gestures, `sonner` toasts, subtle motion, and responsive layouts.
+
+---
+
+## Getting started
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+# optional quality checks
+npm run lint
+npm run build
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Visit http://localhost:3000 to use the app. Desktop shows a two-pane layout (feeds + articles/reader). Mobile collapses into a drill-in stack with tabs for All, Saved, and Tags.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Data lives entirely in the browser’s IndexedDB; clearing site data resets the experience.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+---
 
-## Learn More
+## Architecture overview
 
-To learn more about Next.js, take a look at the following resources:
+| Layer                                                              | Purpose                                                                                                                                             |
+| ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Storage** (`src/lib/storage.ts`)                                 | Typed IndexedDB stores plus helpers for CRUD, search, and metadata.                                                                                 |
+| **Reader store** (`src/lib/reader-store.tsx`)                      | React context that seeds demo data, exposes feed/article state, orchestrates refreshes, reader extraction, and gesture-friendly loading flags.      |
+| **Server routes** (`src/app/api`)                                  | `/api/feeds` normalizes RSS/Atom + caching headers, `/api/feeds/discover` finds feeds from any URL, `/api/reader` extracts clean article text/HTML. |
+| **UI shell** (`src/components/shell/home-shell.tsx`)               | Responsive layout with search, tagging, swipe/keyboard shortcuts, skeletons, empty states, and toast feedback.                                      |
+| **Design primitives** (`src/components/ui`, `src/app/globals.css`) | Accent palette, typography, and reusable buttons/panels/inputs.                                                                                     |
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+---
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Adding auth + sync later
 
-## Deploy on Vercel
+1. **Authentication**: Introduce [NextAuth.js](https://next-auth.js.org/) (App Router `auth.ts`) for sign-in. Email links + OAuth are simple to bolt on.
+2. **Database**: Mirror the IndexedDB schema in Postgres (e.g., Supabase). Store feeds/articles/tags per user with columns for etag/lastModified and sync cursors.
+3. **Sync flow**: Keep IndexedDB as an offline cache. When a session exists, use Supabase Edge Functions (or Next.js route handlers) to pull/push changes, reconciling by feed/article IDs. Emit toasts when sync conflicts occur.
+4. **Future enhancements**: background refresh via Web Push or cron jobs, plus sharing/export once server storage is in place.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+---
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Known limitations & next steps
+
+- Local-only data (no auth/sync) — see the plan above for upgrading.
+- No OPML import/export yet (explicitly out of scope for MVP+).
+- Reader extraction can fail on heavily scripted pages; we fall back to snippets with a CTA to open the original article.
+- Accessibility still needs a full audit (landmarks, high-contrast mode, focus order) even though base shortcuts/ARIA labels exist.
+- Automated tests are not in place; add React Testing Library + integration tests after the core flows settle.
+
+---
+
+## Scripts & tooling
+
+| Command                           | Description                                          |
+| --------------------------------- | ---------------------------------------------------- |
+| `npm run dev`                     | Start the development server.                        |
+| `npm run build` / `npm run start` | Production build & serve.                            |
+| `npm run lint`                    | Generate types + run ESLint with `--max-warnings=0`. |
+| `npm run format`                  | Prettier across the repo.                            |
+
+Enjoy the calm reading experience, and feel free to open an issue/PR when you start exploring sync or new features.
